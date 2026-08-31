@@ -57,29 +57,37 @@ jobs:
                   try:
                       print(f"正在访问: {url}")
                       
-                      # 改进1: 将 wait_until 设为 "load"，确保 React 前端完全渲染
-                      await page.goto(url, wait_until="load", timeout=90_000)
+                      # 改进1: 使用 "networkidle" 等待所有的网络请求（包括 JS 脚本和 React 组件）加载完毕
+                      await page.goto(url, wait_until="networkidle", timeout=60_000)
 
-                      # 改进2: 使用 get_by_text 扩大匹配面，并增加 .first 避免严格模式报错
-                      wake_element = page.get_by_text(
-                          re.compile(r"get this app back up", re.IGNORECASE)
+                      # 改进2: 使用 get_by_role 精确查找 button 元素，避免匹配到不可点击的文本节点
+                      # 匹配 Streamlit 默认的唤醒文案 "Yes, get this app back up!" 或类似文本
+                      wake_button = page.get_by_role(
+                          "button", 
+                          name=re.compile(r"get this app back up|wake up", re.IGNORECASE)
                       ).first
 
                       try:
-                          # 改进3: 使用智能等待代替死等 (wait_for_timeout)，最多等15秒
-                          await wake_element.wait_for(state="visible", timeout=15000)
-                          print(f"检测到休眠状态，正在点击唤醒: {url}")
-                          await wake_element.click()
+                          # 等待按钮处于可见状态
+                          await wake_button.wait_for(state="visible", timeout=15000)
+                          print(f"检测到休眠状态，正在尝试点击唤醒: {url}")
                           
-                          # 点击后预留 25 秒让 Streamlit 容器完成启动初始化
-                          await page.wait_for_timeout(25000)
+                          # 改进3: 使用 force=True 强制点击，无视页面上可能存在的透明遮罩层拦截
+                          await wake_button.click(force=True)
+                          
+                          # 改进4: 点击后增加更充分的等待时间，确保云端容器收到指令并开始冷启动
+                          print("点击成功，等待 30 秒让 Streamlit 容器启动...")
+                          await page.wait_for_timeout(30000)
                           print(f"✅ 唤醒请求已成功发送并等待完成: {url}")
                           
                       except PlaywrightTimeoutError:
-                          print(f"✅ 未检测到休眠按钮（超时未出现），应用可能当前处于活跃状态: {url}")
+                          print(f"✅ 网页中未检测到休眠按钮（超时未出现），应用可能处于正常活跃状态: {url}")
 
                   except Exception as e:
-                      print(f"⚠️ 处理异常 [{url}]: {e}")
+                      print(f"⚠️ 处理该网址时发生异常 [{url}]: {e}")
+                      
+                      # 调试用：如果发生异常（比如被 Cloudflare 拦截），尝试截取当前网页屏幕
+                      # await page.screenshot(path=f"error_{url.replace('https://','').replace('/','')}.png")
                   finally:
                       await context.close()
                       await browser.close()
