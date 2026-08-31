@@ -6,8 +6,16 @@ import plotly.graph_objects as go
 # ================= 页面配置 =================
 st.set_page_config(page_title="深圳园区光储综合能源与现货交易模型", layout="wide")
 
+# 修改点：在此处添加了隐藏 header, MainMenu 和 stDeployButton 的 CSS
 st.markdown('''
 <style>
+/* 隐藏右上角的主菜单、部署按钮和整个头部容器 */
+#MainMenu {visibility: hidden;}
+header {visibility: hidden;}
+.stDeployButton {display:none;}
+footer {visibility: hidden;} /* 可选：隐藏底部的 "Made with Streamlit" */
+
+/* 原有自定义样式 */
 .custom-main-title { font-size: 1.8rem !important; font-weight: bold; margin-bottom: 0.5rem; }
 .custom-sub-title { font-size: 1.3rem !important; font-weight: bold; margin-top: 1.5rem; margin-bottom: 0.5rem; }
 div[data-testid="stMetricValue"] { font-size: 22px !important; white-space: normal !important; word-break: break-word !important; }
@@ -129,7 +137,7 @@ def simulate_market_and_risk(days=30, steps=24):
     ess_revenue = np.zeros(hours)
     if ess_cap > 0 and ess_power > 0:
         if "表后EMC" in sz_mode:
-            daily_arb_profit = ess_cap * 0.85 * 0.7 * 1000  # 假设用户侧峰谷套利价差0.7元/满充满放
+            daily_arb_profit = ess_cap * 0.85 * 0.7 * 1000  
             demand_savings_total = ess_power * 1000 * demand_price * (days / 30.0) 
             for h in range(hours):
                 ess_revenue[h] = (daily_arb_profit / 24.0) + (demand_savings_total / hours)
