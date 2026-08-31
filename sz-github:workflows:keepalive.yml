@@ -30,7 +30,7 @@ jobs:
           python - << 'EOF'
           import asyncio
           import re
-          from playwright.async_api import async_playwright
+          from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
           # 需要保活的 Streamlit 网址列表
           urls = [
@@ -56,21 +56,27 @@ jobs:
 
                   try:
                       print(f"正在访问: {url}")
-                      # Streamlit 包含长连接，使用 domcontentloaded 并配合显式等待更稳定
-                      await page.goto(url, wait_until="domcontentloaded", timeout=90_000)
-                      await page.wait_for_timeout(6000)
+                      
+                      # 改进1: 将 wait_until 设为 "load"，确保 React 前端完全渲染
+                      await page.goto(url, wait_until="load", timeout=90_000)
 
-                      # 模糊匹配唤醒按钮
-                      wake_button = page.get_by_role("button", name=re.compile(r"get this app back up", re.IGNORECASE))
+                      # 改进2: 使用 get_by_text 扩大匹配面，并增加 .first 避免严格模式报错
+                      wake_element = page.get_by_text(
+                          re.compile(r"get this app back up", re.IGNORECASE)
+                      ).first
 
-                      if await wake_button.count() > 0 and await wake_button.is_visible():
+                      try:
+                          # 改进3: 使用智能等待代替死等 (wait_for_timeout)，最多等15秒
+                          await wake_element.wait_for(state="visible", timeout=15000)
                           print(f"检测到休眠状态，正在点击唤醒: {url}")
-                          await wake_button.click()
+                          await wake_element.click()
+                          
                           # 点击后预留 25 秒让 Streamlit 容器完成启动初始化
                           await page.wait_for_timeout(25000)
                           print(f"✅ 唤醒请求已成功发送并等待完成: {url}")
-                      else:
-                          print(f"✅ 应用当前处于活跃状态: {url}")
+                          
+                      except PlaywrightTimeoutError:
+                          print(f"✅ 未检测到休眠按钮（超时未出现），应用可能当前处于活跃状态: {url}")
 
                   except Exception as e:
                       print(f"⚠️ 处理异常 [{url}]: {e}")
