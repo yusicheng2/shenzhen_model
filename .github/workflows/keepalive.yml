@@ -1,0 +1,31 @@
+name: Streamlit Keep-Alive
+
+on:
+  schedule:
+    # 每天 UTC 时间 0点 和 12点 运行 (对应北京时间 8:00 和 20:00)
+    - cron: '0 0,12 * * *' 
+  workflow_dispatch: # 允许你在网页端手动点击按钮触发测试
+
+jobs:
+  wake-up-app:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright
+          # 安装 Chromium 浏览器供 Playwright 使用
+          playwright install chromium 
+
+      - name: Run Keep-Alive Script
+        # 这里指定运行你刚刚上传的 Python 脚本
+        run: python jihuo.py
