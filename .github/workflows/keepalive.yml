@@ -1,87 +1,93 @@
-import asyncio
-import re
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+name: Keep Streamlit Apps Alive (Playwright)
 
-# 需要保活的 Streamlit 网址列表
-urls = [
-    "https://shenzhenmodel-9ihnhaceacjjxieza3wapz.streamlit.app/"
-]
+on:
+  schedule:
+    # 建议每 4 小时触发一次，保持应用活跃
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
 
-async def visit(url):
-    async with async_playwright() as p:
-        # 启动 Chromium 并规避自动化特征
-        browser = await p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-blink-features=AutomationControlled"
-            ]
-        )
-        context = await browser.new_context(
-            viewport={"width": 1280, "height": 800},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-        )
-        page = await context.new_page()
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
 
-        try:
-            print(f"正在访问: {url}")
-            
-            # 改进1: 使用 "networkidle" 等待所有的网络请求（包括 JS 脚本和 React 组件）加载完毕
-            await page.goto(url, wait_until="networkidle", timeout=60000)
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            # 改进2: 使用 locator 定位按钮（精确匹配 Streamlit 默认唤醒文案）
-            wake_button = page.locator('button').filter(has_text=re.compile(r"get this app back up|wake up", re.IGNORECASE)).first
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-            try:
-                # 等待按钮处于可见状态
-                await wake_button.wait_for(state="visible", timeout=15000)
-                print(f"检测到休眠状态，正在尝试点击唤醒: {url}")
-                
-                # 改进3: 使用 force=True 强制点击，无视页面上可能存在的透明遮罩层拦截
-                await wake_button.click(force=True)
-                
-                # 改进4: 点击后增加更充分的等待时间，确保云端容器收到指令并开始冷启动
-                print("点击成功，等待 30 秒让 Streamlit 容器启动...")
-                await page.wait_for_timeout(30000)
-                print(f"✅ 唤醒请求已成功发送并等待完成: {url}")
-                
-            except PlaywrightTimeoutError:
-                print(f"✅ 网页中未检测到休眠按钮（超时未出现），应用可能处于正常活跃状态: {url}")
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          playwright install chromium --with-deps
 
-            # === 关键修复：监听页面加载 + 主动发送唤醒请求 ===
-            # 当页面完全加载完毕（包括 Streamlit 重载）后，发送 POST 请求触发后台唤醒
-            def on_page_load():
-                print(f"检测到页面加载完成，正在发送唤醒请求: {url}")
-                # 使用 fetch API（无副作用，符合浏览器安全策略）
-                page.evaluate("""
-                    (async () => {
-                        try {
-                            await fetch('https://shenzhenmodel-9ihnhaceacjjxieza3wapz.streamlit.app/', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                                body: 'action=keep_alive'
-                            });
-                            console.log('唤醒请求已发送');
-                        } catch (e) {
-                            console.error('唤醒请求失败:', e);
-                        }
-                    })();
-                """)
-            
-            page.on("load", on_page_load)
+      - name: Keep apps awake
+        run: |
+          python - << 'EOF'
+          import asyncio
+          import re
+          from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
-        except Exception as e:
-            print(f"⚠️ 处理该网址时发生异常 [{url}]: {e}")
-            # 如需调试，可取消注释下面一行截图（Cloudflare 拦截等情况）
-            # await page.screenshot(path=f"error_{url.replace('https://','').replace('/','')}.png")
-        finally:
-            await context.close()
-            await browser.close()
+          # 需要保活的 Streamlit 网址列表
+          urls = [
+              "https://shenzhenmodel-9ihnhaceacjjxieza3wapz.streamlit.app/"
+          ]
 
-async def main():
-    for target_url in urls:
-        await visit(target_url)
+          async def visit(url):
+              async with async_playwright() as p:
+                  # 启动 Chromium 并规避自动化特征
+                  browser = await p.chromium.launch(
+                      headless=True,
+                      args=[
+                          "--no-sandbox",
+                          "--disable-setuid-sandbox",
+                          "--disable-blink-features=AutomationControlled"
+                      ]
+                  )
+                  context = await browser.new_context(
+                      viewport={"width": 1280, "height": 800},
+                      user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+                  )
+                  page = await context.new_page()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+                  try:
+                      print(f"正在访问: {url}")
+                      
+                      # 改进1: 将 wait_until 设为 "load"，确保 React 前端完全渲染
+                      await page.goto(url, wait_until="load", timeout=90_000)
+
+                      # 改进2: 使用 get_by_text 扩大匹配面，并增加 .first 避免严格模式报错
+                      wake_element = page.get_by_text(
+                          re.compile(r"get this app back up", re.IGNORECASE)
+                      ).first
+
+                      try:
+                          # 改进3: 使用智能等待代替死等 (wait_for_timeout)，最多等15秒
+                          await wake_element.wait_for(state="visible", timeout=15000)
+                          print(f"检测到休眠状态，正在点击唤醒: {url}")
+                          await wake_element.click()
+                          
+                          # 点击后预留 25 秒让 Streamlit 容器完成启动初始化
+                          await page.wait_for_timeout(25000)
+                          print(f"✅ 唤醒请求已成功发送并等待完成: {url}")
+                          
+                      except PlaywrightTimeoutError:
+                          print(f"✅ 未检测到休眠按钮（超时未出现），应用可能当前处于活跃状态: {url}")
+
+                  except Exception as e:
+                      print(f"⚠️ 处理异常 [{url}]: {e}")
+                  finally:
+                      await context.close()
+                      await browser.close()
+
+          async def main():
+              for target_url in urls:
+                  await visit(target_url)
+
+          if __name__ == "__main__":
+              asyncio.run(main())
+          EOF
